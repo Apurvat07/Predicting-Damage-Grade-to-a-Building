@@ -1,0 +1,478 @@
+---
+title: "Project_2"
+author: "Apurva"
+date: "June 1, 2019"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+########################
+
+Reading the entire dataset with 2 lakh of records
+
+```{r train_full}
+setwd("C:/Users/Apurva Tawde/Desktop/Coursework/Spring19/STAT-642-674 - SP 18-19/Project/Rworkspace")
+
+
+train_full<-read.csv("Updated Trainiing dataset.csv",stringsAsFactors = T)
+str(train_full)
+dim(train_full)
+
+
+
+```
+```{r message=FALSE, warning=FALSE}
+library(class)
+library(nnet)
+library(dplyr)
+library(praznik)
+library(nnet)
+library(randomForest)
+library(e1071)
+library(stats)
+```
+
+generate random variables in the dataset for the categorial data set
+
+```{r train_full}
+
+#install.packages("caret")
+library("caret")
+#Converting every categorical variable to numerical using dummy variables
+dmy <- dummyVars(" ~ .", data = train_full,fullRank = T)
+train_transformed <- data.frame(predict(dmy, newdata = train_full))
+
+```
+
+
+check the dummy variables & change damage_grade to factor variable
+
+```{r}
+
+#Checking the structure of transformed train file
+str(train_transformed)
+
+train_transformed$damage_grade <- as.factor(train_transformed$damage_grade)
+train_transformed$count_floors_pre_eq <- as.factor(train_transformed$count_floors_pre_eq)
+dim(train_transformed)
+```
+
+Drop the variable:
+
+```{r}
+
+train_transformed=train_transformed[,c(6:62,2)]
+str(train_transformed)
+```
+
+Split the data randomly in 5 groups
+
+```{r}
+df<-train_transformed
+N=5
+a<-split(df, sample(1:N, nrow(df), replace=T))
+train_1<-a$`1`
+train_2<-a$`2`
+train_3<-a$`3`
+train_4<-a$`4`
+train_5<-a$`5`
+```
+```{r}
+write.csv(train_1, file = "train_1.csv")
+write.csv(train_2, file = "train_2.csv")
+write.csv(train_3, file = "train_3.csv")
+write.csv(train_4, file = "train_4.csv")
+write.csv(train_5, file = "train_5.csv")
+```
+
+
+checking the variable distribution
+
+```{r}
+a<-as.numeric(train_full$damage_grade)
+hist(a)
+library(plyr)
+count(train_full, 'damage_grade')
+table2 <- table(train_full$damage_grade)
+prop.table(table2)
+
+# Change histogram plot line colors by groups
+
+ggplot(train_full, aes(x=damage_grade, color=damage_grade)) +
+  geom_histogram(fill="blue",alpha=0.5, position="identity",stat="count")
+labs(title="Damage_grade histogram plot imbalanced",x="damage_grade", y = "Count")
+
+
+```
+
+Balancing the class
+
+# SMOTE(Synthetic Minority Over-sampling Technique) Sampling
+# formula - relates how our dependent variable acts based on other independent variable.
+# data - input data
+# perc.over - controls the size of Minority class
+# perc.under - controls the size of Majority class
+# since my data has less Majority class, increasing it with 200 and keeping the minority class to 100.
+
+```{r}
+#install.packages('ROSE')
+#install.packages('DMwR')
+library(DMwR)
+library(ROSE)
+library(plyr)
+dim(train_1)
+smote_sample_train_data <- SMOTE(damage_grade ~ ., data = train_1, perc.over = 90, perc.under=500)
+dim(smote_sample_train_data)
+```
+Print the comparison between the 2 datasets
+
+```{r}
+#initial data set
+a<-as.numeric(train_full$damage_grade)
+hist(a)
+print(table(train_1$damage_grade))
+table2 <- table(train_full$damage_grade)
+prop.table(table2)
+
+#Balanced Data set
+b<-as.numeric(smote_sample_train_data$damage_grade)
+hist(b)
+print(table(smote_sample_train_data$damage_grade))
+table2 <- table(smote_sample_train_data$damage_grade)
+prop.table(table2)
+ggplot(smote_sample_train_data, aes(x=damage_grade, color=damage_grade)) +
+  geom_histogram(fill="green",alpha=0.5, position="identity",stat="count")
+labs(title="Damage_grade histogram plot Balanced",x="damage_grade")
+```
+```{r}
+#write.csv(smote_sample_data_1, file = "smote_sample_train_1.csv")
+
+```
+# Feature selection with Minimum Redundancy Maximal Relevancy Filter
+
+```{r}
+features = MRMR(smote_sample_data_1, smote_sample_data_1$damage_grade, k = 45)
+
+features
+```
+
+Spliting the data set in train & test
+
+```{r}
+
+#Spliting training set into two parts based on outcome: 75% and 25%
+index <- createDataPartition(smote_sample_train_data$damage_grade, p=0.75, list=FALSE)
+trainSet <- smote_sample_train_data[ index,]
+testSet <- smote_sample_train_data[-index,]
+library(dplyr)
+dim(trainSet)
+dim(testSet)
+
+# Drop the columns of the dataframe
+trainSet<-select (trainSet,-c(ground_floor_type.m,ground_floor_type.z, other_floor_type.s, position.o, legal_ownership_status.r,VAR21))
+testSet<-select (testSet,-c(ground_floor_type.m,ground_floor_type.z, other_floor_type.s, position.o, legal_ownership_status.r,VAR21))
+str(trainSet)
+str(testSet)
+
+```
+
+Applying svm with all the features
+
+```{r}
+
+library(e1071)
+svm1 <- svm(trainSet$damage_grade~.
+            , data=trainSet, 
+            method="C-classification", kernal="radial",gamma=0.1, cost=10,scale=TRUE)
+summary(svm1)
+svm1$SV
+prediction <- predict(svm1, testSet)
+xtab <- table(testSet$damage_grade, prediction)
+xtab
+
+```
+
+SVM MODEL Acuracy
+```{r}
+accuracy.svm<-(1719+2630+867)/nrow(testSet) 
+accuracy.svm
+```
+Tunees svm
+```{r}
+dim(trainSet)
+str(trainSet)
+set.seed (1)
+tune.out=tune(svm ,damage_grade~.,data=trainSet ,kernel ="linear", 
+              ranges =list(cost=c(0.001,0.01,0.1, 1,5,10,100)))
+
+summary(tuned_parameters)
+tuned_parameters$SV
+prediction <- predict(tuned_parameters, testSet)
+xtab <- table(testSet$damage_grade, prediction)
+xtab
+```
+SVM WITH FEATURE SELECTION
+```{r}
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+set.seed(3233)
+library(e1071)
+svm_F <- svm(trainSet$damage_grade~has_superstructure_mud_mortar_st+has_superstructure_stone_flag+height_percentage+roof_type.q+foundation_type.r+land_surface_condition.t+ground_floor_type.v+count_families+other_floor_type.q+has_superstructure_adobe_mud+has_secondary_use+has_superstructure_timber+area_percentage+ground_floor_type.x+foundation_type.i+count_floors_pre_eq+position.t+foundation_type.w+has_superstructure_mud_mortar_br+has_superstructure_rc_engineered+has_secondary_use_hotel+plan_configuration.u+roof_type.x+legal_ownership_status.v+has_superstructure_bamboo+other_floor_type.x+age+has_superstructure_rc_non_engine+foundation_type.u+has_secondary_use_agriculture+plan_configuration.q+has_superstructure_other+has_superstructure_cement_mortar+land_surface_condition.o+plan_configuration.s+position.s+has_secondary_use_rental+has_secondary_use_institution+legal_ownership_status.w+has_secondary_use_other+plan_configuration.n
+            , data=trainSet, 
+            method="C-classification", kernal="radial",gamma=0.1, cost=10,scale=TRUE,trControl=trctrl,
+  preProcess = c("center", "scale"),
+  tuneLength = 10)
+summary(svm_F)
+svm_F$SV
+prediction <- predict(svm_F, testSet)
+xtab <- table(testSet$damage_grade, prediction)
+xtab
+
+```
+SVM MODEL Acuracy
+```{r}
+accuracy.svm_F<-(1749+2784+729)/nrow(testSet) 
+accuracy.svm_F
+
+```
+
+
+
+kNN
+
+```{r}
+set.seed(1)
+trControl = trainControl(method="repeatedcv",
+                         repeats = 2,
+                         number=5)
+
+
+knn_train = train(damage_grade ~ .,
+                    data = trainSet, 
+                    method ='knn',
+                    tuneLength=20,
+                    trControl=trControl)
+knn_train
+```
+
+```{r}
+plot(knn_train)
+```
+
+
+```{r}
+set.seed(11)
+knn_43 = knn(trainSet, testSet, cl = trainSet$damage_grade, k = 33)
+knn_cm = as.matrix(table(actual = testSet$damage_grade, pred = knn_43))
+knn_cm
+```
+
+```{r}
+knn_accuracy = sum(diag(knn_cm)/sum(knn_cm))
+cat("kNN accuracy with 33 NNs = ", knn_accuracy)
+```
+kNN with feature selection
+
+```{r}
+set.seed(1)
+trControl = trainControl(method="repeatedcv",
+                         repeats = 2,
+                         number=5)
+
+
+knn_f_train = train(damage_grade ~ has_superstructure_mud_mortar_st+has_superstructure_stone_flag+height_percentage+roof_type.q+foundation_type.r+land_surface_condition.t+ground_floor_type.v+count_families+other_floor_type.q+has_superstructure_adobe_mud+has_secondary_use+has_superstructure_timber+area_percentage+ground_floor_type.x+foundation_type.i+count_floors_pre_eq+position.t+foundation_type.w+has_superstructure_mud_mortar_br+has_superstructure_rc_engineered+has_secondary_use_hotel+plan_configuration.u+roof_type.x+legal_ownership_status.v+has_superstructure_bamboo+other_floor_type.x+age+has_superstructure_rc_non_engine+foundation_type.u+has_secondary_use_agriculture+plan_configuration.q+has_superstructure_other+has_superstructure_cement_mortar+land_surface_condition.o+plan_configuration.s+position.s+has_secondary_use_rental+has_secondary_use_institution+legal_ownership_status.w+has_secondary_use_other+plan_configuration.n,
+                    data = trainSet, 
+                    method ='knn',
+                    tuneLength=20,
+                    trControl=trControl)
+knn_f_train
+```
+
+```{r}
+plot(knn_f_train)
+```
+
+
+```{r}
+set.seed(11)
+knn_f_19 = knn(trainSet, testSet, cl = trainSet$damage_grade, k = 19)
+knn_f_cm = as.matrix(table(actual = testSet$damage_grade, pred = knn_f_19))
+knn_f_cm
+```
+
+```{r}
+knn_f_accuracy = sum(diag(knn_f_cm)/sum(knn_f_cm))
+cat("kNN accuracy with 19 NNs = ", knn_f_accuracy)
+```
+
+
+
+# Random Forest 
+
+```{r}
+set.seed(4)
+rf_mod = randomForest(damage_grade ~ ., data = trainSet,ntree=500, importance = TRUE) 
+rf_mod # parameter set after tuning 
+```
+
+
+```{r}
+rf_pred = predict(rf_mod, testSet, type = "class")
+rf_cm = as.matrix(table(actual = testSet$damage_grade, pred = rf_pred))
+rf_cm
+```
+
+
+
+```{r}
+rf_accuracy = sum(diag(rf_cm)/sum(rf_cm))
+cat("Random Forest accuracy = ", rf_accuracy)
+```
+
+# Random Forest with features
+
+```{r}
+set.seed(4)
+rf_mod_f = randomForest(damage_grade ~ has_superstructure_mud_mortar_st+has_superstructure_stone_flag+height_percentage+roof_type.q+foundation_type.r+land_surface_condition.t+ground_floor_type.v+count_families+other_floor_type.q+has_superstructure_adobe_mud+has_secondary_use+has_superstructure_timber+area_percentage+ground_floor_type.x+foundation_type.i+count_floors_pre_eq+position.t+foundation_type.w+has_superstructure_mud_mortar_br+has_superstructure_rc_engineered+has_secondary_use_hotel+plan_configuration.u+roof_type.x+legal_ownership_status.v+has_superstructure_bamboo+other_floor_type.x+age+has_superstructure_rc_non_engine+foundation_type.u+has_secondary_use_agriculture+plan_configuration.q+has_superstructure_other+has_superstructure_cement_mortar+land_surface_condition.o+plan_configuration.s+position.s+has_secondary_use_rental+has_secondary_use_institution+legal_ownership_status.w+has_secondary_use_other+plan_configuration.n, data = trainSet,ntree=500,importance = TRUE) 
+rf_mod_f # parameter set after tuning 
+```
+
+
+```{r}
+rf_pred_f = predict(rf_mod_f, testSet, type = "class")
+rf_cm_f = as.matrix(table(actual = testSet$damage_grade, pred = rf_pred_f))
+rf_cm_f
+```
+
+
+
+```{r}
+rf_accuracy_f = sum(diag(rf_cm_f)/sum(rf_cm_f))
+cat("Random Forest accuracy = ", rf_accuracy_f)
+```
+
+
+# Naive Bayes 
+
+```{r}
+set.seed(4)
+nb_model = naiveBayes(damage_grade~., trainSet)
+nb_pred = predict(nb_model, testSet, type = "class")
+nb_cm = as.matrix(table(actual = testSet$damage_grade, pred = nb_pred))
+nb_cm
+```
+
+```{r}
+nb_accuracy = sum(diag(nb_cm)/sum(nb_cm))
+cat("Naive Bayes accuracy = ", nb_accuracy)
+```
+# Naive Bayes with features
+
+```{r}
+set.seed(4)
+nb_model_f = naiveBayes(damage_grade~has_superstructure_mud_mortar_st+has_superstructure_stone_flag+height_percentage+roof_type.q+foundation_type.r+land_surface_condition.t+ground_floor_type.v+count_families+other_floor_type.q+has_superstructure_adobe_mud+has_secondary_use+has_superstructure_timber+area_percentage+ground_floor_type.x+foundation_type.i+count_floors_pre_eq+position.t+foundation_type.w+has_superstructure_mud_mortar_br+has_superstructure_rc_engineered+has_secondary_use_hotel+plan_configuration.u+roof_type.x+legal_ownership_status.v+has_superstructure_bamboo+other_floor_type.x+age+has_superstructure_rc_non_engine+foundation_type.u+has_secondary_use_agriculture+plan_configuration.q+has_superstructure_other+has_superstructure_cement_mortar+land_surface_condition.o+plan_configuration.s+position.s+has_secondary_use_rental+has_secondary_use_institution+legal_ownership_status.w+has_secondary_use_other+plan_configuration.n, trainSet)
+nb_pred_f = predict(nb_model_f, testSet, type = "class")
+nb_cm_f = as.matrix(table(actual = testSet$damage_grade, pred = nb_pred_f))
+nb_cm_f
+```
+
+```{r}
+nb_accuracy_f = sum(diag(nb_cm_f)/sum(nb_cm_f))
+cat("Naive Bayes accuracy = ", nb_accuracy_f)
+```
+
+
+# Multinomial logistic regression 
+
+
+
+
+```{r}
+# package nnet
+library(nnet)
+logreg_mod = nnet::multinom(damage_grade ~., trainSet)
+summary(logreg_mod)
+```
+
+
+```{r}
+# Predict on test set
+logreg_pred = logreg_mod %>% 
+  predict(testSet)
+
+# Model accuracy
+cat("Multinomial logistic regression accuracy =", mean(logreg_pred == testSet$damage_grade))
+```
+
+Multinomial with featurePlot(
+  
+  # Multinomial logistic regression 
+
+
+
+
+```{r}
+# package nnet
+library(nnet)
+logreg_mod_f = nnet::multinom(damage_grade ~ has_superstructure_mud_mortar_st+has_superstructure_stone_flag+height_percentage+roof_type.q+foundation_type.r+land_surface_condition.t+ground_floor_type.v+count_families+other_floor_type.q+has_superstructure_adobe_mud+has_secondary_use+has_superstructure_timber+area_percentage+ground_floor_type.x+foundation_type.i+count_floors_pre_eq+position.t+foundation_type.w+has_superstructure_mud_mortar_br+has_superstructure_rc_engineered+has_secondary_use_hotel+plan_configuration.u+roof_type.x+legal_ownership_status.v+has_superstructure_bamboo+other_floor_type.x+age+has_superstructure_rc_non_engine+foundation_type.u+has_secondary_use_agriculture+plan_configuration.q+has_superstructure_other+has_superstructure_cement_mortar+land_surface_condition.o+plan_configuration.s+position.s+has_secondary_use_rental+has_secondary_use_institution+legal_ownership_status.w+has_secondary_use_other+plan_configuration.n, trainSet)
+summary(logreg_mod_f)
+
+# Predict on test set
+logreg_pred_f = logreg_mod_f %>% 
+  predict(testSet)
+
+# Model accuracy
+cat("Multinomial logistic regression accuracy =", mean(logreg_pred_f == testSet$damage_grade))
+```
+```{r}
+logreg_cm_f = as.matrix(table(actual = testSet$damage_grade, pred = logreg_pred_f))
+logreg_cm_f
+cat("Logreg accuracy = ", sum(diag(logreg_cm_f)/sum(logreg_cm_f)))
+```
+
+#Ensemble 
+ Load libraries
+```{r}
+
+library(mlbench)
+library(caret)
+install.packages("caretEnsemble")
+library(caretEnsemble)
+
+
+```
+
+
+```{r}
+
+# Example of Stacking algorithms
+# create submodels
+control <- trainControl(method="repeatedcv", number=10, repeats=3, savePredictions=TRUE, classProbs=TRUE)
+algorithmList <- c('svmRadial', 'knn', 'ORFlog', 'nbDiscrete', 'multinom')
+seed <- 7
+set.seed(seed)
+trainSet_1<-trainSet
+levels(trainSet_1$damage_grade) <- c("first_class", "second_class","Third_class")
+models <- caretList(damage_grade~., data=trainSet_1, trControl=control, methodList=algorithmList)
+results <- resamples(models)
+summary(results)
+dotplot(results)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+)
